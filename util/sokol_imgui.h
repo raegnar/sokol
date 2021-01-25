@@ -1594,6 +1594,21 @@ EM_JS(int, simgui_js_is_osx, (void), {
 });
 #endif
 
+
+
+
+// Global Mouse Data
+static NSCursor*      g_MouseCursors[ImGuiMouseCursor_COUNT] = {};
+static bool           g_MouseCursorHidden = false;
+
+// Undocumented methods for creating cursors.
+@interface NSCursor()
++ (id)_windowResizeNorthWestSouthEastCursor;
++ (id)_windowResizeNorthEastSouthWestCursor;
++ (id)_windowResizeNorthSouthCursor;
++ (id)_windowResizeEastWestCursor;
+@end
+
 static bool _simgui_is_osx(void) {
     #if defined(__EMSCRIPTEN__)
     return simgui_js_is_osx();
@@ -1635,6 +1650,7 @@ SOKOL_API_IMPL void simgui_setup(const simgui_desc_t* desc) {
     #endif
     io->IniFilename = _simgui.desc.ini_filename;
     io->ConfigMacOSXBehaviors = _simgui_is_osx();
+    io->BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
     io->BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
     #if !defined(SOKOL_IMGUI_NO_SOKOL_APP)
         io->KeyMap[ImGuiKey_Tab] = SAPP_KEYCODE_TAB;
@@ -1664,6 +1680,20 @@ SOKOL_API_IMPL void simgui_setup(const simgui_desc_t* desc) {
         io->GetClipboardTextFn = _simgui_get_clipboard;
         #endif
     #endif
+
+    // Load cursors. Some of them are undocumented.
+    g_MouseCursorHidden = false;
+    g_MouseCursors[ImGuiMouseCursor_Arrow]      = [NSCursor arrowCursor];
+    g_MouseCursors[ImGuiMouseCursor_TextInput]  = [NSCursor IBeamCursor];
+    g_MouseCursors[ImGuiMouseCursor_ResizeAll]  = [NSCursor closedHandCursor];
+    g_MouseCursors[ImGuiMouseCursor_Hand]       = [NSCursor pointingHandCursor];
+    g_MouseCursors[ImGuiMouseCursor_NotAllowed] = [NSCursor operationNotAllowedCursor];
+    g_MouseCursors[ImGuiMouseCursor_ResizeNS]   = [NSCursor respondsToSelector:@selector(_windowResizeNorthSouthCursor)] ? [NSCursor _windowResizeNorthSouthCursor] : [NSCursor resizeUpDownCursor];
+    g_MouseCursors[ImGuiMouseCursor_ResizeEW]   = [NSCursor respondsToSelector:@selector(_windowResizeEastWestCursor)] ? [NSCursor _windowResizeEastWestCursor] : [NSCursor resizeLeftRightCursor];
+    g_MouseCursors[ImGuiMouseCursor_ResizeNESW] = [NSCursor respondsToSelector:@selector(_windowResizeNorthEastSouthWestCursor)] ? [NSCursor _windowResizeNorthEastSouthWestCursor] : [NSCursor closedHandCursor];
+    g_MouseCursors[ImGuiMouseCursor_ResizeNWSE] = [NSCursor respondsToSelector:@selector(_windowResizeNorthWestSouthEastCursor)] ? [NSCursor _windowResizeNorthWestSouthEastCursor] : [NSCursor closedHandCursor];
+
+
 
     /* create sokol-gfx resources */
     sg_push_debug_group("sokol-imgui");
@@ -1872,6 +1902,27 @@ SOKOL_API_IMPL void simgui_new_frame(int width, int height, double delta_time) {
         sapp_show_keyboard(false);
     }
     #endif
+
+    if (!(io->ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange)) {
+        ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
+        if (io->MouseDrawCursor || imgui_cursor == ImGuiMouseCursor_None) {
+            // Hide OS mouse cursor if imgui is drawing it or if it wants no cursor
+            if (!g_MouseCursorHidden) {
+                g_MouseCursorHidden = true;
+                [NSCursor hide];
+            }
+        }
+        else {
+            // Show OS mouse cursor
+            imgui_cursor = g_MouseCursors[imgui_cursor] ? imgui_cursor : ImGuiMouseCursor_Arrow;
+            [g_MouseCursors[imgui_cursor] set];
+            if (g_MouseCursorHidden) {
+                g_MouseCursorHidden = false;
+                [NSCursor unhide];
+            }
+        }
+    }
+
     #if defined(__cplusplus)
         ImGui::NewFrame();
     #else
@@ -1925,8 +1976,10 @@ SOKOL_API_IMPL void simgui_render(void) {
         #if defined(__cplusplus)
             const int vtx_size = cl->VtxBuffer.size() * sizeof(ImDrawVert);
             const int idx_size = cl->IdxBuffer.size() * sizeof(ImDrawIdx);
-            const ImDrawVert* vtx_ptr = &cl->VtxBuffer.front();
-            const ImDrawIdx* idx_ptr = &cl->IdxBuffer.front();
+            // const ImDrawVert* vtx_ptr = &cl->VtxBuffer.front();
+            // const ImDrawIdx* idx_ptr = &cl->IdxBuffer.front();
+            const ImDrawVert* vtx_ptr = (cl->VtxBuffer.Data) ? &cl->VtxBuffer.front() : nullptr;
+            const ImDrawIdx* idx_ptr = (cl->IdxBuffer.Data) ? &cl->IdxBuffer.front() : nullptr;
         #else
             const int vtx_size = cl->VtxBuffer.Size * sizeof(ImDrawVert);
             const int idx_size = cl->IdxBuffer.Size * sizeof(ImDrawIdx);
@@ -2114,5 +2167,6 @@ SOKOL_API_IMPL bool simgui_handle_event(const sapp_event* ev) {
     return io->WantCaptureKeyboard || io->WantCaptureMouse;
 }
 #endif
+
 
 #endif /* SOKOL_IMPL */
